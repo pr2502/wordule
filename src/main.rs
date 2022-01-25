@@ -118,6 +118,10 @@ struct Args {
     /// If present prints score for the word and exit
     #[clap(long)]
     score_word: Option<String>,
+
+    /// Show letter scores
+    #[clap(long)]
+    letter_scores: bool,
 }
 
 
@@ -171,6 +175,17 @@ fn main() -> Result<()> {
         let early_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
         words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, false));
         let late_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
+
+        if args.letter_scores {
+            let mut scores = ('a'..='z').map(|ch| (ch, score.letter_score(ch))).collect::<Vec<_>>();
+            scores.sort_by_key(|(_, score)| -score);
+
+            println!("maximum {}", score.half);
+            for (ch, score) in &scores[..13] { print!("  {ch} {score:>4}"); }
+            println!();
+            for (ch, score) in &scores[13..] { print!("  {ch} {score:>4}"); }
+            println!();
+        }
 
         println!("guesses (early, late):");
         for (early, late) in early_guesses.iter().zip(&late_guesses) {

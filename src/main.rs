@@ -106,9 +106,9 @@ fn main() -> Result<()> {
     eprintln!("2. enter a loop of guesses:");
     eprintln!("  2a. pick a word from the top 10 words and write the picked word");
     eprintln!("  2b. tell wurdle what the answer was, for each letter in the guessed word write:");
-    eprintln!("    `_` for grey (no match in word)");
+    eprintln!("    `x` for grey (no match in word)");
     eprintln!("    `?` for orange (match somewhere in the word)");
-    eprintln!("    `x` for green (exact match)");
+    eprintln!("    `o` for green (exact match)");
     let mut rl = rustyline::Editor::<()>::new();
 
     let length = loop {
@@ -158,13 +158,13 @@ fn main() -> Result<()> {
 
             for (i, (res, pick)) in res.chars().zip(picked.chars()).enumerate() {
                 match res {
-                    '_' => {
+                    'x' => {
                         forbidden_everywhere.insert(pick);
                     },
                     '?' => {
                         forbidden_position[i].insert(pick);
                     },
-                    'x' => {
+                    'o' => {
                         fixed_letters[i] = Some(pick);
                     },
                     _ => {

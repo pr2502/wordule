@@ -115,6 +115,10 @@ struct Args {
     #[clap(long, default_value = "/usr/share/dict/words")]
     dict: String,
 
+    /// Amount of best guesses to show
+    #[clap(long, default_value = "10")]
+    guesses: usize,
+
     /// If present prints score for the word and exit
     #[clap(long)]
     score_word: Option<String>,
@@ -172,9 +176,9 @@ fn main() -> Result<()> {
         // sort current possible guesses
         let score = Scoring::new(&words);
         words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, true));
-        let early_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
+        let early_guesses = Vec::from(if words.len() < args.guesses { &words[..] } else { &words[..args.guesses] });
         words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, false));
-        let late_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
+        let late_guesses = Vec::from(if words.len() < args.guesses { &words[..] } else { &words[..args.guesses] });
 
         if args.letter_scores {
             let mut scores = ('a'..='z').map(|ch| (ch, score.letter_score(ch))).collect::<Vec<_>>();

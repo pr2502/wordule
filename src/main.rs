@@ -1,55 +1,92 @@
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::Read;
-use regex::Regex;
 use std::mem;
-use std::collections::HashSet;
+
+
+#[derive(Clone, Default)]
+struct LetterSet {
+    set: u32,
+}
+
+fn to_ascii_index(letter: char) -> u8 {
+    assert!(letter.is_ascii_lowercase(), "unsupported character");
+    (letter as u8) - b'a'
+}
+
+impl LetterSet {
+    fn from_word(word: &str) -> LetterSet {
+        let mut set = LetterSet::default();
+        for ch in word.chars() {
+            set.insert(ch);
+        }
+        set
+    }
+
+    fn insert(&mut self, letter: char) {
+        self.set |= 1u32 << to_ascii_index(letter);
+    }
+
+    fn contains(&self, letter: char) -> bool {
+        (self.set & (1u32 << to_ascii_index(letter))) != 0
+    }
+}
+
+
+#[derive(Default)]
+struct LetterCount {
+    map: [usize; 26],
+}
+
+impl LetterCount {
+    fn increment(&mut self, letter: char) {
+        self.map[usize::from(to_ascii_index(letter))] += 1;
+    }
+
+    fn get(&self, letter: char) -> usize {
+        self.map[usize::from(to_ascii_index(letter))]
+    }
+}
 
 
 /// all scoring assumes that words are only comprised of [a-z] ascii characters
-#[derive(Debug)]
 struct Scoring {
     /// half the number of total words
     half: isize,
     /// number of words a letter occurs in
-    letters: [isize; 26],
-}
-
-fn word_letters(word: &str) -> [u8; 26] {
-    let mut letters = [0; 26];
-    for ch in word.as_bytes() {
-        letters[usize::from(ch - b'a')] += 1;
-    }
-    letters
+    count: LetterCount,
 }
 
 impl Scoring {
     fn new(words: &[&str]) -> Scoring {
-        let mut letters = [0; 26];
+        let mut count = LetterCount::default();
         let half = (words.len() as isize) / 2;
         for word in words {
-            for (i, &cnt) in word_letters(word).iter().enumerate() {
-                letters[i] += isize::min(1, cnt.into());
+            let word_set = LetterSet::from_word(word);
+            for ch in 'a'..='z' {
+                if word_set.contains(ch) {
+                    count.increment(ch);
+                }
             }
         }
-        words.iter()
-            .flat_map(|w| w.as_bytes())
-            .for_each(|ch| letters[usize::from(ch - b'a')] += 1);
-        Scoring { letters, half }
+        Scoring { count, half }
+    }
+
+    fn letter_score(&self, letter: char) -> isize {
+        self.half - isize::abs(self.count.get(letter) as isize - self.half)
     }
 
     /// scores a word by summing up scores for its unique letters, each letter is scored higher the
     /// closer it is to being in half of the present counted words
-    fn score(&self, word: &str) -> isize {
-        word_letters(word)
-            .iter()
-            .zip(&self.letters)
-            .map(|(&cnt, &freq)| {
-                // FIXME this is probably wrong :(
-                if cnt == 0 { return 0 }
-                100_000 - isize::abs(self.half - freq)
-            })
-            .sum()
+    fn word_score(&self, word: &str) -> isize {
+        let mut total = 0;
+        let set = LetterSet::from_word(word);
+        for ch in 'a'..='z' {
+            if set.contains(ch) {
+                total += self.letter_score(ch);
+            }
+        }
+        total
     }
 }
 
@@ -60,10 +97,8 @@ fn main() -> Result<()> {
     file.read_to_string(&mut buf).context("reading words file")?;
 
     // parse all possibly applicable words from the file
-    let words_re = Regex::new("(?m)^[a-z]+$").unwrap();
-    let words = words_re
-        .find_iter(&buf)
-        .map(|m| m.as_str())
+    let words = buf.lines()
+        .filter(|line| line.chars().all(|ch| ch.is_ascii_lowercase()))
         .collect::<Vec<_>>();
 
     eprintln!("wurdle: wordle solving thingy");
@@ -90,19 +125,19 @@ fn main() -> Result<()> {
 
     // hints
     let mut fixed_letters = vec![None; length]; // letters we already know for sure
-    let mut forbidden_position = vec![HashSet::new(); length]; // letters which are only forbidden for a certain position
-    let mut forbidden_everywhere = [false; 26]; // letters that can never be used again
+    let mut forbidden_position = vec![LetterSet::default(); length]; // letters which are only forbidden for a certain position
+    let mut forbidden_everywhere = LetterSet::default(); // letters that can never be used again
 
     // guess loop
     loop {
         // sort current possible guesses
         let score = Scoring::new(&words);
-        words.sort_unstable_by_key(|word| -score.score(word));
+        words.sort_unstable_by_key(|word| -score.word_score(word));
 
         let guesses = if words.len() < 10 { &words[..] } else { &words[..10] };
         println!("guesses:");
         for guess in guesses {
-            println!("  {guess}   {}", score.score(guess));
+            println!("  {guess}   {}", score.word_score(guess));
         }
 
         // pick word
@@ -112,7 +147,6 @@ fn main() -> Result<()> {
                 _ => eprintln!("length doesn't match"),
             }
         };
-        let picked = picked.as_bytes();
 
         // parse wordle response
         loop {
@@ -122,19 +156,19 @@ fn main() -> Result<()> {
                 continue
             }
 
-            for (i, ch) in res.chars().enumerate() {
-                match ch {
+            for (i, (res, pick)) in res.chars().zip(picked.chars()).enumerate() {
+                match res {
                     '_' => {
-                        forbidden_everywhere[usize::from(picked[i] - b'a')] = true;
+                        forbidden_everywhere.insert(pick);
                     },
                     '?' => {
-                        forbidden_position[i].insert(picked[i] as char);
+                        forbidden_position[i].insert(pick);
                     },
                     'x' => {
-                        fixed_letters[i] = Some(picked[i] as char);
+                        fixed_letters[i] = Some(pick);
                     },
                     _ => {
-                        eprintln!("invalid response syntax at {i}: `{ch}`");
+                        eprintln!("invalid response syntax at {i}: `{res}`");
                         continue
                     }
                 }
@@ -147,7 +181,7 @@ fn main() -> Result<()> {
             .filter(|word| {
                 for (i, ch) in word.chars().enumerate() {
                     // forbidden letter
-                    if forbidden_everywhere[usize::from(ch as u8 - b'a')] {
+                    if forbidden_everywhere.contains(ch) {
                         return false
                     }
                     // mismatched fixed letter
@@ -157,7 +191,7 @@ fn main() -> Result<()> {
                         }
                     }
                     // forbidden positional letter
-                    if forbidden_position[i].contains(&ch) {
+                    if forbidden_position[i].contains(ch) {
                         return false
                     }
                 }

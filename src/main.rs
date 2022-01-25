@@ -78,12 +78,25 @@ impl Scoring {
 
     /// scores a word by summing up scores for its unique letters, each letter is scored higher the
     /// closer it is to being in half of the present counted words
-    fn word_score(&self, word: &str) -> isize {
+    fn word_score(&self, word: &str, present_letters: &LetterSet, early: bool) -> isize {
         let mut total = 0;
         let set = LetterSet::from_word(word);
         for ch in 'a'..='z' {
             if set.contains(ch) {
-                total += self.letter_score(ch);
+                let score = self.letter_score(ch);
+                // adjust score for early and late game, in early game letters which we haven't
+                // tried yet get a boost, in late game letters which are definitely included get a
+                // boost. it's up to the player to pick using the early/late game sorting
+                let adjust = match (early, present_letters.contains(ch)) {
+                    // early game
+                    (true, true) => 0, // do not guess already known letters
+                    (true, false) => score, // leave the not-present letters alone
+
+                    // late game
+                    (false, true) => score * 2, // buff the present letters
+                    (false, false) => score, // leave the non-present letters alone
+                };
+                total += adjust;
             }
         }
         total
@@ -127,17 +140,24 @@ fn main() -> Result<()> {
     let mut fixed_letters = vec![None; length]; // letters we already know for sure
     let mut forbidden_position = vec![LetterSet::default(); length]; // letters which are only forbidden for a certain position
     let mut forbidden_everywhere = LetterSet::default(); // letters that can never be used again
+    let mut present_everywhere = LetterSet::default(); // letters which are definitely present
 
     // guess loop
     loop {
         // sort current possible guesses
         let score = Scoring::new(&words);
-        words.sort_unstable_by_key(|word| -score.word_score(word));
+        words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, true));
+        let early_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
+        words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, false));
+        let late_guesses = Vec::from(if words.len() < 10 { &words[..] } else { &words[..10] });
 
-        let guesses = if words.len() < 10 { &words[..] } else { &words[..10] };
-        println!("guesses:");
-        for guess in guesses {
-            println!("  {guess}   {}", score.word_score(guess));
+        println!("guesses (early, late):");
+        for (early, late) in early_guesses.iter().zip(&late_guesses) {
+            println!(
+                "  {early}    {late}      {}    {}",
+                score.word_score(early, &present_everywhere, true),
+                score.word_score(late, &present_everywhere, false),
+            );
         }
 
         // pick word
@@ -163,9 +183,11 @@ fn main() -> Result<()> {
                     },
                     '?' => {
                         forbidden_position[i].insert(pick);
+                        present_everywhere.insert(pick);
                     },
                     'o' => {
                         fixed_letters[i] = Some(pick);
+                        present_everywhere.insert(pick);
                     },
                     _ => {
                         eprintln!("invalid response syntax at {i}: `{res}`");

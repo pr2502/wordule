@@ -138,6 +138,7 @@ fn main() -> Result<()> {
 
     // hints
     let mut fixed_letters = vec![None; length]; // letters we already know for sure
+    let mut fixed_anywhere = LetterSet::default(); // letters which have ben used for a position fix
     let mut forbidden_position = vec![LetterSet::default(); length]; // letters which are only forbidden for a certain position
     let mut forbidden_everywhere = LetterSet::default(); // letters that can never be used again
     let mut present_everywhere = LetterSet::default(); // letters which are definitely present
@@ -162,10 +163,20 @@ fn main() -> Result<()> {
 
         // pick word
         let picked = loop {
-            match rl.readline("picked> ").context("readline")? {
-                word if word.len() == length => break word,
-                _ => eprintln!("length doesn't match"),
+            let word = rl.readline("picked> ").context("readline")?;
+            if word.len() != length {
+                eprintln!("length doesn't match");
+                continue
             }
+            if word.chars().any(|ch| !ch.is_ascii_lowercase()) {
+                eprintln!("contains invalid chars");
+                continue
+            }
+            if word.chars().all(|ch| ['o', 'x'].contains(&ch)) {
+                eprintln!("only contains `o` and `x`, we want picked guess not pattern");
+                continue
+            }
+            break word
         };
 
         // parse wordle response
@@ -179,7 +190,21 @@ fn main() -> Result<()> {
             for (i, (res, pick)) in res.chars().zip(picked.chars()).enumerate() {
                 match res {
                     'x' => {
-                        forbidden_everywhere.insert(pick);
+                        if fixed_anywhere.contains(pick) {
+                            // the letter was already used somewhere as a fix but we didn't get `?`
+                            // for a different position, make it forbidden everywhere but the fixed
+                            // position
+                            for i in 0..length {
+                                if let Some(fix) = fixed_letters[i] {
+                                    if fix != pick {
+                                        forbidden_position[i].insert(pick);
+                                    }
+                                }
+                            }
+                        } else {
+                            // it was never used
+                            forbidden_everywhere.insert(pick);
+                        }
                     },
                     '?' => {
                         forbidden_position[i].insert(pick);
@@ -187,6 +212,7 @@ fn main() -> Result<()> {
                     },
                     'o' => {
                         fixed_letters[i] = Some(pick);
+                        fixed_anywhere.insert(pick);
                         present_everywhere.insert(pick);
                     },
                     _ => {

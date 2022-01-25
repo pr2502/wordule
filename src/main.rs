@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clap::Parser;
 use std::fs::File;
 use std::io::Read;
 use std::mem;
@@ -104,37 +105,56 @@ impl Scoring {
 }
 
 
+#[derive(Parser)]
+struct Args {
+    /// Guessed word length
+    #[clap(long, default_value = "5")]
+    length: usize,
+
+    /// Path to a dictionary file
+    #[clap(long, default_value = "/usr/share/dict/words")]
+    dict: String,
+
+    /// If present prints score for the word and exit
+    #[clap(long)]
+    score_word: Option<String>,
+}
+
+
 fn main() -> Result<()> {
-    let mut file = File::open("/usr/share/dict/words").context("opening words file")?;
+    let args = Args::parse();
+
+    let mut file = File::open(&args.dict).context("opening words file")?;
     let mut buf = String::new();
     file.read_to_string(&mut buf).context("reading words file")?;
 
+    let length = args.length;
+    assert!(length > 0, "length must be positive");
+
     // parse all possibly applicable words from the file
-    let words = buf.lines()
-        .filter(|line| line.chars().all(|ch| ch.is_ascii_lowercase()))
+    let mut words = buf.lines()
+        .filter(|line| line.len() == length && line.chars().all(|ch| ch.is_ascii_lowercase()))
         .collect::<Vec<_>>();
+
+    if let Some(score_word) = &args.score_word {
+        let score = Scoring::new(&words);
+
+        println!(
+            "  {score_word}      {}",
+            // with an empty set there is no difference between early/late scores
+            score.word_score(score_word, &LetterSet::default(), true),
+        );
+        return Ok(());
+    }
 
     eprintln!("wordule: wordle solving thingy");
-    eprintln!("1. enter the game word length");
-    eprintln!("2. enter a loop of guesses:");
-    eprintln!("  2a. pick a word from the top 10 words and write the picked word");
-    eprintln!("  2b. tell wordule what the answer was, for each letter in the guessed word write:");
-    eprintln!("    `x` for grey (no match in word)");
-    eprintln!("    `?` for orange (match somewhere in the word)");
-    eprintln!("    `o` for green (exact match)");
+    eprintln!("1. pick a word from the top 10 words and write the picked word");
+    eprintln!("2. tell wordule what the answer was, for each letter in the guessed word write:");
+    eprintln!("  `x` for grey (no match in word)");
+    eprintln!("  `?` for orange (match somewhere in the word)");
+    eprintln!("  `o` for green (exact match)");
+    eprintln!("3. repeat");
     let mut rl = rustyline::Editor::<()>::new();
-
-    let length = loop {
-        match rl.readline("word length> ").context("readline")?.parse::<usize>() {
-            Ok(length) if length > 0 => break length,
-            _ => eprintln!("must be a positive number"),
-        }
-    };
-
-    // filter by length
-    let mut words = words.into_iter()
-        .filter(|word| word.len() == length)
-        .collect::<Vec<_>>();
 
     // hints
     let mut fixed_letters = vec![None; length]; // letters we already know for sure

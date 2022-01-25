@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use clap::Parser;
 use std::fs::File;
 use std::io::Read;
@@ -10,9 +10,13 @@ struct LetterSet {
     set: u32,
 }
 
-fn to_ascii_index(letter: char) -> u8 {
-    assert!(letter.is_ascii_lowercase(), "unsupported character");
-    (letter as u8) - b'a'
+fn to_letter_index(letter: char) -> Option<u8> {
+    letter.is_ascii_lowercase()
+        .then(|| (letter as u8) - b'a')
+}
+
+fn letters() -> impl Iterator<Item = char> {
+    'a'..='z'
 }
 
 impl LetterSet {
@@ -25,11 +29,17 @@ impl LetterSet {
     }
 
     fn insert(&mut self, letter: char) {
-        self.set |= 1u32 << to_ascii_index(letter);
+        if let Some(index) = to_letter_index(letter) {
+            self.set |= 1u32 << index;
+        }
     }
 
     fn contains(&self, letter: char) -> bool {
-        (self.set & (1u32 << to_ascii_index(letter))) != 0
+        if let Some(index) = to_letter_index(letter) {
+            (self.set & (1u32 << index)) != 0
+        } else {
+            false
+        }
     }
 }
 
@@ -41,11 +51,17 @@ struct LetterCount {
 
 impl LetterCount {
     fn increment(&mut self, letter: char) {
-        self.map[usize::from(to_ascii_index(letter))] += 1;
+        if let Some(index) = to_letter_index(letter) {
+            self.map[usize::from(index)] += 1;
+        }
     }
 
     fn get(&self, letter: char) -> usize {
-        self.map[usize::from(to_ascii_index(letter))]
+        if let Some(index) = to_letter_index(letter) {
+            self.map[usize::from(index)]
+        } else {
+            0
+        }
     }
 }
 
@@ -64,13 +80,17 @@ impl Scoring {
         let half = (words.len() as isize) / 2;
         for word in words {
             let word_set = LetterSet::from_word(word);
-            for ch in 'a'..='z' {
+            for ch in letters() {
                 if word_set.contains(ch) {
                     count.increment(ch);
                 }
             }
         }
         Scoring { count, half }
+    }
+
+    fn max_score(&self) -> isize {
+        self.half
     }
 
     fn letter_score(&self, letter: char) -> isize {
@@ -82,7 +102,7 @@ impl Scoring {
     fn word_score(&self, word: &str, present_letters: &LetterSet, early: bool) -> isize {
         let mut total = 0;
         let set = LetterSet::from_word(word);
-        for ch in 'a'..='z' {
+        for ch in letters() {
             if set.contains(ch) {
                 let score = self.letter_score(ch);
                 // adjust score for early and late game, in early game letters which we haven't
@@ -137,7 +157,7 @@ fn main() -> Result<()> {
     file.read_to_string(&mut buf).context("reading words file")?;
 
     let length = args.length;
-    assert!(length > 0, "length must be positive");
+    ensure!(length > 0, "word length must be positive");
 
     // parse all possibly applicable words from the file
     let mut words = buf.lines()
@@ -155,13 +175,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    eprintln!("wordule: wordle solving thingy");
-    eprintln!("1. pick a word from the top 10 words and write the picked word");
-    eprintln!("2. tell wordule what the answer was, for each letter in the guessed word write:");
-    eprintln!("  `x` for grey (no match in word)");
-    eprintln!("  `?` for orange (match somewhere in the word)");
-    eprintln!("  `o` for green (exact match)");
-    eprintln!("3. repeat");
+    eprintln!("\
+wordule: wordle solving thingy
+    1. pick a word from the top 10 words and write the picked word
+    2. tell wordule what the answer was, for each letter in the guessed word write:
+        `x` for grey (no match in word)
+        `?` for orange (match somewhere in the word)
+        `o` for green (exact match)
+    3. repeat
+");
+
     let mut rl = rustyline::Editor::<()>::new();
 
     // hints
@@ -181,10 +204,10 @@ fn main() -> Result<()> {
         let late_guesses = Vec::from(if words.len() < args.guesses { &words[..] } else { &words[..args.guesses] });
 
         if args.letter_scores {
-            let mut scores = ('a'..='z').map(|ch| (ch, score.letter_score(ch))).collect::<Vec<_>>();
+            let mut scores = letters().map(|ch| (ch, score.letter_score(ch))).collect::<Vec<_>>();
             scores.sort_by_key(|(_, score)| -score);
 
-            println!("maximum {}", score.half);
+            println!("maximum {}", score.max_score());
             for (ch, score) in &scores[..13] { print!("  {ch} {score:>4}"); }
             println!();
             for (ch, score) in &scores[13..] { print!("  {ch} {score:>4}"); }

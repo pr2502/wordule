@@ -101,11 +101,11 @@ fn main() -> Result<()> {
         .filter(|line| line.chars().all(|ch| ch.is_ascii_lowercase()))
         .collect::<Vec<_>>();
 
-    eprintln!("wurdle: wordle solving thingy");
+    eprintln!("wordule: wordle solving thingy");
     eprintln!("1. enter the game word length");
     eprintln!("2. enter a loop of guesses:");
     eprintln!("  2a. pick a word from the top 10 words and write the picked word");
-    eprintln!("  2b. tell wurdle what the answer was, for each letter in the guessed word write:");
+    eprintln!("  2b. tell wordule what the answer was, for each letter in the guessed word write:");
     eprintln!("    `x` for grey (no match in word)");
     eprintln!("    `?` for orange (match somewhere in the word)");
     eprintln!("    `o` for green (exact match)");

@@ -4,15 +4,13 @@ use std::fs::File;
 use std::io::Read;
 use std::mem;
 
-
 #[derive(Clone, Default)]
 struct LetterSet {
     set: u32,
 }
 
 fn to_letter_index(letter: char) -> Option<u8> {
-    letter.is_ascii_lowercase()
-        .then(|| (letter as u8) - b'a')
+    letter.is_ascii_lowercase().then(|| (letter as u8) - b'a')
 }
 
 fn letters() -> impl Iterator<Item = char> {
@@ -43,7 +41,6 @@ impl LetterSet {
     }
 }
 
-
 #[derive(Default)]
 struct LetterCount {
     map: [usize; 26],
@@ -64,7 +61,6 @@ impl LetterCount {
         }
     }
 }
-
 
 /// all scoring assumes that words are only comprised of [a-z] ascii characters
 struct Scoring {
@@ -93,14 +89,15 @@ impl Scoring {
         self.half
     }
 
-    fn letter_score(&self, letter: char) -> isize {
-        self.half - isize::abs(self.count.get(letter) as isize - self.half)
+    fn letter_score(&self, letter: char) -> f32 {
+        let abs_score = self.half - isize::abs(self.count.get(letter) as isize - self.half);
+        (abs_score as f32) / (self.half as f32)
     }
 
     /// scores a word by summing up scores for its unique letters, each letter is scored higher the
     /// closer it is to being in half of the present counted words
-    fn word_score(&self, word: &str, present_letters: &LetterSet, early: bool) -> isize {
-        let mut total = 0;
+    fn word_score(&self, word: &str, present_letters: &LetterSet, early: bool) -> f32 {
+        let mut total = 0.0;
         let set = LetterSet::from_word(word);
         for ch in letters() {
             if set.contains(ch) {
@@ -110,12 +107,12 @@ impl Scoring {
                 // boost. it's up to the player to pick using the early/late game sorting
                 let adjust = match (early, present_letters.contains(ch)) {
                     // early game
-                    (true, true) => 0, // do not guess already known letters
+                    (true, true) => 0.0,    // do not guess already known letters
                     (true, false) => score, // leave the not-present letters alone
 
                     // late game
-                    (false, true) => score * 2, // buff the present letters
-                    (false, false) => score, // leave the non-present letters alone
+                    (false, true) => score * 2.0, // buff the present letters
+                    (false, false) => score,      // leave the non-present letters alone
                 };
                 total += adjust;
             }
@@ -123,7 +120,6 @@ impl Scoring {
         total
     }
 }
-
 
 #[derive(Parser)]
 struct Args {
@@ -148,19 +144,20 @@ struct Args {
     letter_scores: bool,
 }
 
-
 fn main() -> Result<()> {
     let args = Args::parse();
 
     let mut file = File::open(&args.dict).context("opening words file")?;
     let mut buf = String::new();
-    file.read_to_string(&mut buf).context("reading words file")?;
+    file.read_to_string(&mut buf)
+        .context("reading words file")?;
 
     let length = args.length;
     ensure!(length > 0, "word length must be positive");
 
     // parse all possibly applicable words from the file
-    let mut words = buf.lines()
+    let mut words = buf
+        .lines()
         .filter(|line| line.len() == length && line.chars().all(|ch| ch.is_ascii_lowercase()))
         .collect::<Vec<_>>();
 
@@ -175,7 +172,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    eprintln!("\
+    eprintln!(
+        "\
 wordule: wordle solving thingy
     1. pick a word from the top 10 words and write the picked word
     2. tell wordule what the answer was, for each letter in the guessed word write:
@@ -183,7 +181,8 @@ wordule: wordle solving thingy
         `?` for orange (match somewhere in the word)
         `o` for green (exact match)
     3. repeat
-");
+"
+    );
 
     let mut rl = rustyline::Editor::<()>::new();
 
@@ -198,28 +197,50 @@ wordule: wordle solving thingy
     loop {
         // sort current possible guesses
         let score = Scoring::new(&words);
-        words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, true));
-        let early_guesses = Vec::from(if words.len() < args.guesses { &words[..] } else { &words[..args.guesses] });
-        words.sort_unstable_by_key(|word| -score.word_score(word, &present_everywhere, false));
-        let late_guesses = Vec::from(if words.len() < args.guesses { &words[..] } else { &words[..args.guesses] });
+        words.sort_by(|left, right| {
+            let ls = score.word_score(left, &present_everywhere, true);
+            let rs = score.word_score(right, &present_everywhere, true);
+            ls.partial_cmp(&rs).unwrap().reverse()
+        });
+        let early_guesses = Vec::from(if words.len() < args.guesses {
+            &words[..]
+        } else {
+            &words[..args.guesses]
+        });
+        words.sort_by(|left, right| {
+            let ls = score.word_score(left, &present_everywhere, true);
+            let rs = score.word_score(right, &present_everywhere, true);
+            ls.partial_cmp(&rs).unwrap().reverse()
+        });
+        let late_guesses = Vec::from(if words.len() < args.guesses {
+            &words[..]
+        } else {
+            &words[..args.guesses]
+        });
 
         if args.letter_scores {
-            let mut scores = letters().map(|ch| (ch, score.letter_score(ch))).collect::<Vec<_>>();
-            scores.sort_by_key(|(_, score)| -score);
+            let mut scores = letters()
+                .map(|ch| (ch, score.letter_score(ch)))
+                .collect::<Vec<_>>();
+            scores.sort_by(|(_, ls), (_, rs)| ls.partial_cmp(rs).unwrap().reverse());
 
             println!("maximum {}", score.max_score());
-            for (ch, score) in &scores[..13] { print!("  {ch} {score:>4}"); }
+            for (ch, score) in &scores[..13] {
+                print!("  {ch} {score:>4.3}");
+            }
             println!();
-            for (ch, score) in &scores[13..] { print!("  {ch} {score:>4}"); }
+            for (ch, score) in &scores[13..] {
+                print!("  {ch} {score:>4.3}");
+            }
             println!();
         }
 
         println!("guesses (early, late):");
         for (early, late) in early_guesses.iter().zip(&late_guesses) {
             println!(
-                "  {early}    {late}      {}    {}",
-                score.word_score(early, &present_everywhere, true),
-                score.word_score(late, &present_everywhere, false),
+                "{early: >7}  {es: >4.2}  {late: >7}  {ls: >4.2}",
+                es = score.word_score(early, &present_everywhere, true),
+                ls = score.word_score(late, &present_everywhere, false),
             );
         }
 
@@ -228,17 +249,17 @@ wordule: wordle solving thingy
             let word = rl.readline("picked> ").context("readline")?;
             if word.len() != length {
                 eprintln!("length doesn't match");
-                continue
+                continue;
             }
             if word.chars().any(|ch| !ch.is_ascii_lowercase()) {
                 eprintln!("contains invalid chars");
-                continue
+                continue;
             }
             if word.chars().all(|ch| ['o', 'x'].contains(&ch)) {
                 eprintln!("only contains `o` and `x`, we want picked guess not pattern");
-                continue
+                continue;
             }
-            break word
+            break word;
         };
 
         // parse wordle response
@@ -246,7 +267,7 @@ wordule: wordle solving thingy
             let res = rl.readline("response> ").context("readline")?;
             if res.len() != length {
                 eprintln!("response length doesn't match");
-                continue
+                continue;
             }
 
             for (i, (res, pick)) in res.chars().zip(picked.chars()).enumerate() {
@@ -267,42 +288,43 @@ wordule: wordle solving thingy
                             // it was never used
                             forbidden_everywhere.insert(pick);
                         }
-                    },
+                    }
                     '?' => {
                         forbidden_position[i].insert(pick);
                         present_everywhere.insert(pick);
-                    },
+                    }
                     'o' => {
                         fixed_letters[i] = Some(pick);
                         fixed_anywhere.insert(pick);
                         present_everywhere.insert(pick);
-                    },
+                    }
                     _ => {
                         eprintln!("invalid response syntax at {i}: `{res}`");
-                        continue
+                        continue;
                     }
                 }
             }
-            break
-        };
+            break;
+        }
 
         // filter out impossible guesses
-        words = mem::take(&mut words).into_iter()
+        words = mem::take(&mut words)
+            .into_iter()
             .filter(|word| {
                 for (i, ch) in word.chars().enumerate() {
                     // forbidden letter
                     if forbidden_everywhere.contains(ch) {
-                        return false
+                        return false;
                     }
                     // mismatched fixed letter
                     if let Some(fixed) = &fixed_letters[i] {
                         if *fixed != ch {
-                            return false
+                            return false;
                         }
                     }
                     // forbidden positional letter
                     if forbidden_position[i].contains(ch) {
-                        return false
+                        return false;
                     }
                 }
 

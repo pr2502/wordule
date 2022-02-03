@@ -1,5 +1,6 @@
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
+use std::cmp::Ordering;
 use std::fs::File;
 use std::io::Read;
 use std::mem;
@@ -156,13 +157,13 @@ fn main() -> Result<()> {
     ensure!(length > 0, "word length must be positive");
 
     // parse all possibly applicable words from the file
-    let mut words = buf
+    let mut all_words = buf
         .lines()
         .filter(|line| line.len() == length && line.chars().all(|ch| ch.is_ascii_lowercase()))
         .collect::<Vec<_>>();
 
     if let Some(score_word) = &args.score_word {
-        let score = Scoring::new(&words);
+        let score = Scoring::new(&all_words);
 
         println!(
             "  {score_word}      {}",
@@ -184,6 +185,7 @@ wordule: wordle solving thingy
 "
     );
 
+    let mut words = all_words.clone();
     let mut rl = rustyline::Editor::<()>::new();
 
     // hints
@@ -197,20 +199,20 @@ wordule: wordle solving thingy
     loop {
         // sort current possible guesses
         let score = Scoring::new(&words);
-        words.sort_by(|left, right| {
+        all_words.sort_by(|left, right| {
             let ls = score.word_score(left, &present_everywhere, true);
             let rs = score.word_score(right, &present_everywhere, true);
-            ls.partial_cmp(&rs).unwrap().reverse()
+            ls.partial_cmp(&rs).unwrap_or(Ordering::Equal).reverse()
         });
-        let early_guesses = Vec::from(if words.len() < args.guesses {
-            &words[..]
+        let early_guesses = Vec::from(if all_words.len() < args.guesses {
+            &all_words[..]
         } else {
-            &words[..args.guesses]
+            &all_words[..args.guesses]
         });
         words.sort_by(|left, right| {
             let ls = score.word_score(left, &present_everywhere, true);
             let rs = score.word_score(right, &present_everywhere, true);
-            ls.partial_cmp(&rs).unwrap().reverse()
+            ls.partial_cmp(&rs).unwrap_or(Ordering::Equal).reverse()
         });
         let late_guesses = Vec::from(if words.len() < args.guesses {
             &words[..]
@@ -222,7 +224,9 @@ wordule: wordle solving thingy
             let mut scores = letters()
                 .map(|ch| (ch, score.letter_score(ch)))
                 .collect::<Vec<_>>();
-            scores.sort_by(|(_, ls), (_, rs)| ls.partial_cmp(rs).unwrap().reverse());
+            scores.sort_by(|(_, ls), (_, rs)| {
+                ls.partial_cmp(rs).unwrap_or(Ordering::Equal).reverse()
+            });
 
             println!("maximum {}", score.max_score());
             for (ch, score) in &scores[..13] {
